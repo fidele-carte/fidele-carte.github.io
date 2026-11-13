@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Super-admin · Fidèle</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.wrap{max-width:720px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.resto{border-left:6px solid var(--c,#1C1A17)}
+.resto .meta{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
+.staffrow{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+.staffrow:first-child{border-top:0}
+.linkbox{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--bg);border-radius:10px;padding:8px 10px;word-break:break-all}
+.tabs2{display:flex;gap:6px;margin-bottom:14px}
+.tabs2 button{flex:1;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-weight:600;font-size:14px}
+.tabs2 button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+@media (max-width:520px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <span class="brand">Fidèle<span>.</span> <span class="small" style="font-family:Inter,sans-serif">super-admin</span></span>
+    <div class="row hide" id="topActions"><a class="btn ghost sm" href="admin.html">Gérant</a><button class="btn ghost sm" id="logoutBtn">Déconnexion</button></div>
+  </header>
+  <div id="login"></div>
+
+  <main id="app" class="hide">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="tabs2">
+      <button class="on" data-tab="restos">Restaurants</button>
+      <button data-tab="newResto">+ Restaurant</button>
+      <button data-tab="newUser">+ Compte</button>
+    </div>
+
+    <section id="t-restos"><div id="restos"><p class="small">Chargement…</p></div></section>
+
+    <section id="t-newResto" class="hide">
+      <div class="panel">
+        <h3 style="margin-bottom:12px">Nouveau restaurant</h3>
+        <form id="fResto">
+          <div class="field"><label for="rName">Nom du commerce</label><input id="rName" required maxlength="60" placeholder="Ex. Le Comptoir"></div>
+          <div class="grid2">
+            <div class="field"><label for="rSlug">Identifiant (adresse)</label><input id="rSlug" required pattern="[a-z0-9-]+" maxlength="40"></div>
+            <div class="field"><label for="rPrefix">Préfixe des cartes</label><input id="rPrefix" required pattern="[A-Za-z]{2,4}" maxlength="4"></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label for="rGoal">Tampons pour une récompense</label><input id="rGoal" type="number" min="2" max="20" value="10" required></div>
+            <div class="field"><label for="rReward">Récompense</label><input id="rReward" required maxlength="60" value="Un dessert offert"></div>
+          </div>
+          <div class="field"><label>Couleur de la carte</label><div class="swatches" id="rSw"></div></div>
+          <button class="btn" type="submit">Créer le restaurant</button>
+          <div class="err hide" id="rErr"></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="t-newUser" class="hide">
+      <div class="panel">
+        <h3 style="margin-bottom:4px">Nouveau compte (patron ou serveur)</h3>
+        <p class="small" style="margin-bottom:12px">Crée le compte et le relie au restaurant. Si l'email a déjà un compte, il est simplement relié.</p>
+        <form id="fUser">
+          <div class="field"><label for="uEmail">Email</label><input id="uEmail" type="email" required autocomplete="off"></div>
+          <div class="field"><label for="uPass">Mot de passe provisoire (8 caractères min.)</label>
+            <div class="row"><input id="uPass" class="inp" required minlength="8" autocomplete="new-password" style="flex:1"><button type="button" class="btn ghost sm" id="uGen">Générer</button></div></div>
+          <div class="grid2">
+            <div class="field"><label for="uResto">Restaurant</label><select id="uResto" required></select></div>
+            <div class="field"><label for="uRole">Rôle</label><select id="uRole"><option value="gerant">Gérant (back-office + scan)</option><option value="serveur">Serveur (scan uniquement)</option></select></div>
+          </div>
+          <button class="btn" type="submit">Créer et relier le compte</button>
+          <div class="err hide" id="uErr"></div>
+        </form>
+      </div>
+      <div class="panel hide" id="uDone"></div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="modal"><div class="box" id="mBox"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script>
+const COLORS = ['#B23A2B', '#1F3A5F', '#2F5D50', '#1C1A17', '#8A5A2B', '#6B3FA0'];
+const SITE = new URL('.', location.href).href;
+let RESTOS = [], rColor = COLORS[1], slugTouched = false, prefixTouched = false;
+
+const ADMIN_ERRORS = {
+  acces_refuse: 'Accès réservé au super-admin.',
+  slug_pris: 'Cet identifiant est déjà utilisé par un autre restaurant.',
+  donnees_invalides: 'Vérifie les champs (identifiant en minuscules et tirets, préfixe de 2 à 4 lettres, 2 à 20 tampons).',
+  compte_inconnu: 'Aucun compte avec cet email.',
+  resto_inconnu: 'Restaurant introuvable.',
+  role_invalide: 'Rôle invalide.',
+  mot_de_passe_court: 'Mot de passe trop court (8 caractères minimum).',
+  email_invalide: 'Email invalide.',
+  creation_refusee: 'Supabase a refusé la création du compte.',
+  modification_refusee: 'Supabase a refusé la modification.'
+};
+const aErr = c => ADMIN_ERRORS[c] || errText(c);
+
+requireStaff($('#login'), init);
+$('#logoutBtn').addEventListener('click', logout);
+
+async function init() {
+  const { data: ok } = await sb.rpc('is_superadmin');
+  if (ok !== true) {
+    $('#login').innerHTML = '<div class="panel"><h3>Accès réservé</h3><p class="small" style="margin-top:6px">Ce compte n\'est pas super-admin. <a href="admin.html">Aller à l\'espace gérant</a>.</p></div>';
+    return;
+  }
+  $('#app').classList.remove('hide');
+  $('#topActions').classList.remove('hide');
+  renderSwatches();
+  await load();
+}
+
+async function load() {
+  const { data, error } = await sb.rpc('admin_overview');
+  if (error) { $('#restos').innerHTML = '<div class="panel"><p class="small">Chargement impossible : ' + esc(error.message) + '</p></div>'; return; }
+  RESTOS = data || [];
+  const cards = RESTOS.reduce((a, r) => a + r.cards, 0), stamps = RESTOS.reduce((a, r) => a + r.stamps_30d, 0);
+  $('#kpis').innerHTML = [[RESTOS.length, 'Restaurants'], [cards, 'Cartes clients'], [stamps, 'Tampons (30 j)'], [RESTOS.reduce((a, r) => a + r.staff.length, 0), 'Comptes équipe']]
+    .map(k => '<div class="kpi"><div class="n">' + k[0] + '</div><div class="t">' + k[1] + '</div></div>').join('');
+  $('#uResto').innerHTML = RESTOS.map(r => '<option value="' + r.id + '">' + esc(r.name) + '</option>').join('');
+  $('#restos').innerHTML = RESTOS.length ? RESTOS.map(restoHTML).join('') : '<div class="panel"><p class="small">Aucun restaurant.</p></div>';
+}
+
+function restoHTML(r) {
+  const url = SITE + 'index.html?r=' + r.slug;
+  const staff = r.staff.length ? r.staff.map(s =>
+    '<div class="staffrow"><div class="grow"><div class="name" style="font-size:14px">' + esc(s.email) + '</div><div class="small">' + (s.role === 'gerant' ? 'Gérant' : 'Serveur') + '</div></div>' +
+    '<button class="btn ghost sm" data-pw="' + s.user_id + '" data-email="' + esc(s.email) + '">Mot de passe</button>' +
+    '<button class="btn ghost sm" data-unlink="' + s.user_id + '" data-resto="' + r.id + '" data-email="' + esc(s.email) + '">Retirer</button></div>').join('')
+    : '<p class="small">Aucun compte. Ajoute le patron via « + Compte ».</p>';
+  return '<div class="panel resto" style="--c:' + esc(r.color) + '">' +
+    '<div class="row sp"><h3>' + esc(r.name) + '</h3><span class="pill">' + esc(r.prefix) + '</span></div>' +
+    '<div class="meta"><span class="pill">' + r.goal + ' tampons = ' + esc(r.reward) + '</span><span class="pill">' + r.cards + ' cartes</span><span class="pill">' + r.stamps_30d + ' tampons / 30 j</span></div>' +
+    '<div class="small" style="margin-bottom:6px">Lien d\'inscription client (QR de l\'affiche) :</div>' +
+    '<div class="row" style="margin-bottom:14px"><div class="linkbox grow">' + esc(url) + '</div><button class="btn ghost sm" data-copy="' + esc(url) + '">Copier</button><button class="btn ghost sm" data-qr="' + esc(url) + '" data-name="' + esc(r.name) + '">QR</button></div>' +
+    '<div class="small" style="font-weight:600;margin-bottom:2px">Équipe</div>' + staff + '</div>';
+}
+
+// ---------- Onglets ----------
+document.querySelectorAll('.tabs2 button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+function showTab(t) {
+  document.querySelectorAll('.tabs2 button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  ['restos', 'newResto', 'newUser'].forEach(x => $('#t-' + x).classList.toggle('hide', x !== t));
+}
+
+// ---------- Actions sur la liste ----------
+$('#restos').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.copy) {
+    try { await navigator.clipboard.writeText(b.dataset.copy); toast('Lien copié'); } catch (_) { toast('Copie impossible : sélectionne le lien.'); }
+  } else if (b.dataset.qr) {
+    openModal('<h3 style="margin-bottom:4px">' + esc(b.dataset.name) + '</h3><p class="small">QR d\'inscription client</p><div class="poster"><div class="qr" id="mQr"></div></div><button class="btn" data-close>Fermer</button>');
+    drawQR($('#mQr'), b.dataset.qr, 220);
+  } else if (b.dataset.unlink) {
+    openModal('<h3 style="margin-bottom:8px">Retirer ce compte ?</h3><p class="small" style="margin-bottom:16px">' + esc(b.dataset.email) + ' n\'aura plus accès à ce restaurant. Le compte lui-même n\'est pas supprimé.</p>' +
+      '<div class="row"><button class="btn ghost grow" data-close>Annuler</button><button class="btn accent grow" id="mOk">Retirer</button></div>');
+    $('#mOk').addEventListener('click', async () => {
+      const { data, error } = await sb.rpc('admin_unlink_staff', { p_user_id: b.dataset.unlink, p_restaurant_id: b.dataset.resto });
+      closeModal();
+      if (error || (data && data.error)) return toast(error ? error.message : aErr(data.error));
+      toast('Compte retiré'); load();
+    });
+  } else if (b.dataset.pw) {
+    const pw = genPass();
+    openModal('<h3 style="margin-bottom:8px">Nouveau mot de passe</h3><p class="small" style="margin-bottom:10px">Pour ' + esc(b.dataset.email) + '</p>' +
+      '<input class="inp" id="mPw" value="' + pw + '" minlength="8" style="margin-bottom:12px">' +
+      '<div class="row"><button class="btn ghost grow" data-close>Annuler</button><button class="btn grow" id="mOk">Enregistrer</button></div>');
+    $('#mOk').addEventListener('click', async () => {
+      const res = await adminUsers({ action: 'password', user_id: b.dataset.pw, password: $('#mPw').value });
+      if (res.error) return toast(aErr(res.error));
+      const val = $('#mPw').value;
+      $('#mBox').innerHTML = '<h3 style="margin-bottom:8px">Mot de passe changé</h3><p class="small" style="margin-bottom:10px">Transmets-le à ' + esc(b.dataset.email) + ' :</p><div class="linkbox" style="margin-bottom:12px;font-size:15px">' + esc(val) + '</div><button class="btn" data-close>Fermer</button>';
+    });
+  }
+});
+
+// ---------- Nouveau restaurant ----------
+const noAccents = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+const slugify = s => noAccents(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+const prefixOf = s => { const l = noAccents(s).toUpperCase().replace(/[^A-Z]/g, ''); return (l + 'XXX').slice(0, 3); };
+$('#rName').addEventListener('input', () => {
+  const n = $('#rName').value;
+  if (!slugTouched) $('#rSlug').value = slugify(n);
+  if (!prefixTouched) $('#rPrefix').value = prefixOf(n);
+});
+$('#rSlug').addEventListener('input', () => { slugTouched = true; });
+$('#rPrefix').addEventListener('input', () => { prefixTouched = true; });
+
+function renderSwatches() {
+  $('#rSw').innerHTML = COLORS.map(c => '<button type="button" class="sw ' + (c === rColor ? 'on' : '') + '" style="background:' + c + '" data-c="' + c + '" aria-label="Couleur ' + c + '"></button>').join('');
+}
+$('#rSw').addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (!b) return; rColor = b.dataset.c; renderSwatches(); });
+
+$('#fResto').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = $('#rErr'); err.classList.add('hide');
+  const btn = $('#fResto button[type=submit]'); btn.disabled = true;
+  const { data, error } = await sb.rpc('admin_create_resto', {
+    p_slug: $('#rSlug').value, p_name: $('#rName').value, p_prefix: $('#rPrefix').value,
+    p_goal: parseInt($('#rGoal').value, 10), p_reward: $('#rReward').value, p_color: rColor
+  });
+  btn.disabled = false;
+  if (error || (data && data.error)) { err.textContent = error ? error.message : aErr(data.error); err.classList.remove('hide'); return; }
+  const name = $('#rName').value;
+  $('#fResto').reset(); slugTouched = prefixTouched = false; $('#rGoal').value = 10;
+  await load();
+  $('#uResto').value = data.id;
+  toast(name + ' créé. Ajoute maintenant le compte du patron.');
+  showTab('newUser');
+});
+
+// ---------- Nouveau compte ----------
+function genPass() {
+  const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const v = new Uint32Array(10); crypto.getRandomValues(v);
+  return Array.from(v, x => a[x % a.length]).join('');
+}
+$('#uGen').addEventListener('click', () => { $('#uPass').value = genPass(); });
+$('#uPass').value = genPass();
+
+async function adminUsers(body) {
+  const { data: s } = await sb.auth.getSession();
+  if (!s.session) return { error: 'non_connecte' };
+  try {
+    const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/admin-users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY, Authorization: 'Bearer ' + s.session.access_token },
+      body: JSON.stringify(body)
+    });
+    return await r.json();
+  } catch (_) { return { error: 'reseau' }; }
+}
+
+$('#fUser').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = $('#uErr'); err.classList.add('hide');
+  const btn = $('#fUser button[type=submit]'); btn.disabled = true;
+  const email = $('#uEmail').value.trim().toLowerCase(), password = $('#uPass').value;
+  const rid = $('#uResto').value, role = $('#uRole').value;
+  const resto = RESTOS.find(r => r.id === rid);
+  const c = await adminUsers({ action: 'create', email: email, password: password });
+  if (c.error) { btn.disabled = false; err.textContent = aErr(c.error); err.classList.remove('hide'); return; }
+  const { data, error } = await sb.rpc('admin_link_staff', { p_email: email, p_restaurant_id: rid, p_role: role });
+  btn.disabled = false;
+  if (error || (data && data.error)) { err.textContent = error ? error.message : aErr(data.error); err.classList.remove('hide'); return; }
+  const page = role === 'gerant' ? 'admin.html' : 'scan.html';
+  $('#uDone').innerHTML = '<h3 style="margin-bottom:8px">✓ Compte prêt</h3>' +
+    '<p class="small" style="margin-bottom:10px">' + (c.exists ? 'Ce compte existait déjà : il a été relié à ' + esc(resto.name) + ', son mot de passe n\'a pas changé.' : 'À transmettre à la personne :') + '</p>' +
+    '<div class="linkbox" style="margin-bottom:8px">Adresse : ' + esc(SITE + page) + '<br>Email : ' + esc(email) + (c.exists ? '' : '<br>Mot de passe : ' + esc(password)) + '</div>' +
+    '<button class="btn ghost sm" id="uCopy">Copier ces infos</button>';
+  $('#uDone').classList.remove('hide');
+  const text = 'Fidèle — ' + resto.name + '\nAdresse : ' + SITE + page + '\nEmail : ' + email + (c.exists ? '' : '\nMot de passe : ' + password);
+  $('#uCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(text); toast('Infos copiées'); } catch (_) { toast('Copie impossible'); } });
+  $('#fUser').reset(); $('#uPass').value = genPass(); $('#uResto').value = rid;
+  load();
+});
+
+// ---------- Fenêtre ----------
+function openModal(html) { $('#mBox').innerHTML = html; $('#modal').classList.add('on'); }
+function closeModal() { $('#modal').classList.remove('on'); }
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal' || e.target.closest('[data-close]')) closeModal(); });
+</script>
+</body>
+</html>
