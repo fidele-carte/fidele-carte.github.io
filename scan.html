@@ -103,6 +103,7 @@ async function stamp(scan) {
   if (data.error === 'deja_scanne') { cur = data; return showCard('warn', 'Déjà scannée il y a moins d\'une minute'); }
   if (data.error) return showMsg('warn', errText(data.error), '');
   cur = data;
+  walletCall('sync', data.card.token).catch(() => {});   // met à jour la carte Google Wallet
   if (navigator.vibrate) navigator.vibrate(80);
   showCard('ok', data.won ? '🎁 Carte complétée : ' + data.reward : '✓ +1 tampon');
 }
@@ -113,6 +114,7 @@ async function redeem() {
   if (error || !data) return toast('Connexion impossible.');
   if (data.error) return toast(errText(data.error));
   cur.card = data.card;
+  walletCall('sync', data.card.token).catch(() => {});
   showCard('ok', '✓ Récompense utilisée');
 }
 
