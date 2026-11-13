@@ -90,3 +90,14 @@ async function requireStaff(mount, onReady) {
 }
 
 async function logout() { await sb.auth.signOut(); location.reload(); }
+
+// Google Wallet (fonction Supabase "wallet")
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+async function walletCall(action, token) {
+  const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/wallet', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_KEY },
+    body: JSON.stringify({ action: action, token: token })
+  });
+  return r.json();
+}
