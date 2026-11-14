@@ -44,6 +44,8 @@
   <button class="btn" id="mClose">Fermer</button>
 </div></div>
 
+<div class="modal" id="modal2"><div class="box" id="m2Box"></div></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -51,7 +53,7 @@
 <script src="app.js"></script>
 <script>
 // Écran du serveur : scan caméra + recherche manuelle
-let cur = null;          // {card, goal, reward} affiché dans le panneau résultat
+let cur = null;          // {card} affiché dans le panneau résultat
 let lock = false;        // évite de traiter 10 fois le même QR
 let scanning = false;
 const video = $('#video'), canvas = $('#canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -71,7 +73,7 @@ async function loadMyPoint() {
   if (!row) return;
   const p = row.points, t = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
   const active = ((p.promo && p.promo.trim()) || p.multiplier > 1) && (!p.promo_start || p.promo_start <= t) && (!p.promo_end || p.promo_end >= t);
-  const promo = active ? [p.multiplier > 1 ? 'Tampons x' + p.multiplier : '', p.promo || ''].filter(Boolean).join(' · ') : '';
+  const promo = active ? [p.multiplier > 1 ? 'Points x' + p.multiplier : '', p.promo || ''].filter(Boolean).join(' · ') : '';
   $('#ptBanner').innerHTML = '<div class="panel" style="padding:12px 16px;margin-bottom:14px">' +
     '<div class="small">Point de vente</div><div class="name">' + esc(p.name) + '</div>' +
     (promo ? '<div style="margin-top:6px"><span class="pill gift">Promo : ' + esc(promo) + '</span></div>' : '') + '</div>';
@@ -113,46 +115,66 @@ async function onQR(text) {
   setTimeout(() => { lock = false; }, 3000);
 }
 
-// ---------- Tampon / récompense ----------
+// ---------- Points / récompenses ----------
 async function stamp(scan) {
   const { data, error } = await sb.rpc('add_stamp', { p_scan: scan });
-  if (error || !data) return showMsg('warn', 'Connexion impossible', 'Le tampon n\'a pas été enregistré. Vérifie le réseau et rescanne.');
+  if (error || !data) return showMsg('warn', 'Connexion impossible', 'Les points n\'ont pas été ajoutés. Vérifie le réseau et rescanne.');
   if (data.error === 'deja_scanne') { cur = data; return showCard('warn', 'Déjà scannée il y a moins d\'une minute'); }
   if (data.error) return showMsg('warn', errText(data.error), '');
   cur = data;
   walletCall('sync', data.card.token).catch(() => {});   // met à jour la carte Google Wallet
   if (navigator.vibrate) navigator.vibrate(80);
   const added = data.added || 1;
-  const plus = '+' + added + ' tampon' + (added > 1 ? 's' : '') + (data.promo ? ' · ' + data.promo : '');
-  showCard('ok', data.won ? '🎁 Carte complétée : ' + data.reward + ' (' + plus + ')' : '✓ ' + plus);
+  showCard('ok', '✓ +' + added + ' point' + (added > 1 ? 's' : '') + (data.promo ? ' · ' + data.promo : ''));
 }
 
-async function redeem() {
-  if (!cur) return;
-  const { data, error } = await sb.rpc('redeem', { p_card_id: cur.card.id });
+async function loadCatalog(cardId) {
+  const { data: k } = await sb.from('cards').select('restaurant_id').eq('id', cardId).single();
+  if (!k) return [];
+  const { data } = await sb.from('rewards_catalog').select('id, name, cost, stock').eq('restaurant_id', k.restaurant_id).eq('active', true).order('cost');
+  return data || [];
+}
+
+async function redeem(w) {
+  const { data, error } = await sb.rpc('redeem_reward', { p_card_id: cur.card.id, p_reward_id: w.id });
+  $('#modal2').classList.remove('on');
   if (error || !data) return toast('Connexion impossible.');
   if (data.error) return toast(errText(data.error));
   cur.card = data.card;
   walletCall('sync', data.card.token).catch(() => {});
-  showCard('ok', '✓ Récompense utilisée');
+  showCard('ok', '🎁 ' + data.reward + ' échangé (−' + data.cost + ' pts)');
 }
 
 function showMsg(kind, title, sub) {
   $('#result').innerHTML = '<div class="result ' + kind + '"><h3>' + esc(title) + '</h3>' + (sub ? '<p class="small" style="margin-top:4px">' + esc(sub) + '</p>' : '') + '</div>';
 }
 
-function showCard(kind, title) {
-  const c = cur.card, goal = cur.goal, left = goal - c.stamps;
+async function showCard(kind, title) {
+  const c = cur.card;
+  const cat = await loadCatalog(c.id);
   $('#result').innerHTML =
     '<div class="result ' + kind + '">' +
     '<div class="eyebrow" style="margin:0;color:var(--' + (kind === 'ok' ? 'ok' : 'warn') + ')">' + esc(title) + '</div>' +
     '<div class="row sp"><h3 style="font-size:20px">' + esc(c.first_name) + '</h3><span class="pill">' + esc(c.code) + '</span></div>' +
-    '<div class="meter"><b style="width:' + Math.min(100, c.stamps / goal * 100) + '%"></b></div>' +
-    '<div class="small">' + c.stamps + ' / ' + goal + ' · encore ' + left + ' avant : ' + esc(cur.reward) + '</div>' +
-    (c.rewards ? '<button class="btn accent" style="margin-top:14px" id="redeemBtn">Utiliser la récompense (' + c.rewards + ' dispo)</button>' : '') +
-    '<div class="row" style="margin-top:10px"><button class="btn ghost sm grow" id="plusBtn">+1 tampon</button><button class="btn ghost sm grow" id="showBtn">Réafficher sa carte</button></div>' +
+    '<div style="font-family:Fraunces,Georgia,serif;font-size:34px;font-weight:600;margin:6px 0 10px">' + c.points + ' pts</div>' +
+    (cat.length ? '<div class="small" style="margin-bottom:4px">Le client choisit : échanger maintenant ou continuer à cumuler.</div>' +
+      cat.map((w, i) => {
+        const ok = c.points >= w.cost && w.stock !== 0;
+        return '<div class="row sp" style="padding:8px 0;border-top:1px solid var(--line)"><div class="grow"><div class="name" style="font-size:14px">' + esc(w.name) + '</div>' +
+          '<div class="small">' + w.cost + ' pts' + (w.stock !== null ? ' · ' + (w.stock > 0 ? w.stock + ' restant' + (w.stock > 1 ? 's' : '') : 'épuisé') : '') + '</div></div>' +
+          (ok ? '<button class="btn accent sm" data-rw="' + i + '">Échanger</button>' : '<span class="pill">' + (w.stock === 0 ? 'Épuisé' : 'Encore ' + (w.cost - c.points)) + '</span>') + '</div>';
+      }).join('') : '') +
+    '<div class="row" style="margin-top:10px"><button class="btn ghost sm grow" id="plusBtn">+1 point</button><button class="btn ghost sm grow" id="showBtn">Réafficher sa carte</button></div>' +
     '</div>';
-  const rb = $('#redeemBtn'); if (rb) rb.addEventListener('click', redeem);
+  $('#result').querySelectorAll('[data-rw]').forEach(b => b.addEventListener('click', () => {
+    const w = cat[+b.dataset.rw];
+    $('#m2Box').innerHTML = '<h3 style="margin-bottom:8px">Échanger ' + w.cost + ' points ?</h3>' +
+      '<p class="small" style="margin-bottom:16px">' + esc(c.first_name) + ' reçoit : ' + esc(w.name) + '. Il lui restera ' + (c.points - w.cost) + ' pts.</p>' +
+      '<div class="row"><button class="btn ghost grow" id="m2No">Annuler</button><button class="btn accent grow" id="m2Yes">Échanger</button></div>';
+    $('#modal2').classList.add('on');
+    $('#m2No').addEventListener('click', () => $('#modal2').classList.remove('on'));
+    $('#m2Yes').addEventListener('click', () => { $('#m2Yes').disabled = true; redeem(w); });
+  }));
   $('#plusBtn').addEventListener('click', () => stamp(c.token));
   $('#showBtn').addEventListener('click', () => {
     $('#mName').textContent = c.first_name;
@@ -162,6 +184,7 @@ function showCard(kind, title) {
   window.scrollTo({ top: $('#result').offsetTop - 12, behavior: 'smooth' });
 }
 $('#mClose').addEventListener('click', () => $('#modal').classList.remove('on'));
+$('#modal2').addEventListener('click', e => { if (e.target.id === 'modal2') $('#modal2').classList.remove('on'); });
 
 // ---------- Recherche manuelle ----------
 async function search() {
@@ -172,7 +195,7 @@ async function search() {
   const parts = ['first_name.ilike.%' + q + '%', 'code.ilike.%' + q + '%'];
   if (digits.length >= 2) parts.push('phone.ilike.%' + digits + '%');
   const { data, error } = await sb.from('cards')
-    .select('id, first_name, code, phone, stamps, rewards, token, restaurants(goal, reward)')
+    .select('id, first_name, code, phone, points, token')
     .or(parts.join(',')).limit(8);
   if (error) return toast('Recherche impossible.');
   const ul = $('#found');
@@ -180,11 +203,10 @@ async function search() {
   ul.innerHTML = data.map((c, i) =>
     '<li class="tap" data-i="' + i + '"><div class="av">' + esc(c.first_name[0].toUpperCase()) + '</div>' +
     '<div class="grow"><div class="name">' + esc(c.first_name) + '</div><div class="small">' + esc(c.code) + ' · ' + esc(c.phone) + '</div></div>' +
-    (c.rewards ? '<span class="pill gift">🎁 ' + c.rewards + '</span>' : '') +
-    '<span class="pill">' + c.stamps + '/' + c.restaurants.goal + '</span></li>').join('');
+    '<span class="pill">' + c.points + ' pts</span></li>').join('');
   ul.querySelectorAll('li.tap').forEach(li => li.addEventListener('click', () => {
     const c = data[+li.dataset.i];
-    cur = { card: c, goal: c.restaurants.goal, reward: c.restaurants.reward };
+    cur = { card: c };
     showCard('ok', 'Client sélectionné');
   }));
 }
