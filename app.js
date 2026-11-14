@@ -35,30 +35,43 @@ const ERRORS = {
   reessayer: 'Petit souci, réessaie.',
   non_connecte: 'Session expirée, reconnecte-toi.',
   carte_inconnue: 'Carte inconnue pour ce restaurant.',
-  aucune_recompense: 'Aucune récompense à utiliser.'
+  aucune_recompense: 'Aucune récompense à utiliser.',
+  recompense_inconnue: 'Récompense introuvable.',
+  points_insuffisants: 'Pas assez de points.',
+  epuise: 'Cette récompense est épuisée.'
 };
 const errText = code => ERRORS[code] || 'Erreur : ' + code;
 
 const ICON_STAR = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7L12 17.3 5.7 21.2l1.7-7L2 9.5l7.1-.6z"/></svg>';
 const ICON_GIFT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8c-2-4-6-4-6-1.5S10 8 12 8zm0 0c2-4 6-4 6-1.5S14 8 12 8z"/></svg>';
 
-// Carte façon Wallet. card = {first_name, code, stamps, rewards, resto:{name, goal, reward, color}}
+// Carte façon Wallet. card = {first_name, code, points, resto:{name, color}, catalog:[{name, cost, stock}]}
 function cardHTML(card) {
-  const r = card.resto;
-  let st = '';
-  for (let i = 0; i < r.goal; i++) {
-    const on = i < card.stamps, last = i === r.goal - 1;
-    st += '<div class="stamp ' + (on ? 'on' : '') + (last && !on ? ' gift' : '') + '">' + (on ? ICON_STAR : (last ? ICON_GIFT : '')) + '</div>';
-  }
+  const r = card.resto, cat = card.catalog || [];
+  const next = cat.find(w => w.cost > card.points && w.stock !== 0);
+  const pct = next ? Math.min(100, card.points / next.cost * 100) : 100;
   return '<div class="wallet">' +
     '<div class="row sp" style="align-items:flex-start"><div class="logo">' + esc(r.name) + '</div>' +
-    '<div style="text-align:right"><div class="lbl">Tampons</div><div class="val">' + card.stamps + ' / ' + r.goal + '</div></div></div>' +
-    '<div class="stamps">' + st + '</div>' +
-    (card.rewards ? '<div class="reward-banner">🎁 ' + esc(r.reward) + ' à récupérer' + (card.rewards > 1 ? ' ×' + card.rewards : '') + '</div>' : '') +
-    '<div class="row sp" style="margin-bottom:14px"><div><div class="lbl">Membre</div><div class="val">' + esc(card.first_name) + '</div></div>' +
-    '<div style="text-align:right"><div class="lbl">Récompense</div><div class="val">' + esc(r.reward) + '</div></div></div>' +
+    '<div style="text-align:right"><div class="lbl">Membre</div><div class="val">' + esc(card.first_name) + '</div></div></div>' +
+    '<div style="margin:22px 0 4px"><div class="lbl">Mes points</div><div style="font-family:Fraunces,Georgia,serif;font-size:52px;font-weight:600;line-height:1.05">' + card.points + '</div></div>' +
+    (next ? '<div style="height:8px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden;margin:10px 0 6px"><b style="display:block;height:100%;width:' + pct + '%;background:#fff;border-radius:99px"></b></div>' +
+      '<div style="font-size:13px;margin-bottom:16px">Encore ' + (next.cost - card.points) + ' pts pour : ' + esc(next.name) + '</div>' : '<div style="height:16px"></div>') +
     '<div class="qrbox"><div id="qr"></div><div class="code">' + esc(card.code) + '</div></div>' +
     '</div>';
+}
+
+// Liste des récompenses sous la carte du client
+function catalogHTML(card) {
+  const cat = card.catalog || [];
+  if (!cat.length) return '';
+  return '<div class="panel" style="padding:14px 16px"><div class="eyebrow" style="margin-bottom:4px">Mes récompenses</div>' +
+    '<p class="small" style="margin-bottom:8px">Échange tes points au comptoir quand tu veux, ou continue à cumuler.</p>' +
+    cat.map(w => {
+      const ok = card.points >= w.cost && w.stock !== 0;
+      const tag = w.stock === 0 ? '<span class="pill">Épuisé</span>' : ok ? '<span class="pill gift">Disponible</span>' : '<span class="pill">Encore ' + (w.cost - card.points) + ' pts</span>';
+      return '<div class="row sp" style="padding:8px 0;border-top:1px solid var(--line)"><div class="grow"><div class="name" style="font-size:14px">' + esc(w.name) + '</div>' +
+        '<div class="small">' + w.cost + ' pts' + (w.stock > 0 ? ' · ' + w.stock + ' place' + (w.stock > 1 ? 's' : '') + ' restante' + (w.stock > 1 ? 's' : '') : '') + '</div></div>' + tag + '</div>';
+    }).join('') + '</div>';
 }
 
 function drawQR(el, text, size) {
