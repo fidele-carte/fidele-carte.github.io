@@ -52,6 +52,8 @@
   </main>
 </div>
 
+<div class="modal" id="modal"><div class="box" id="mBox"></div></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
@@ -131,11 +133,13 @@ $('#copyBtn').addEventListener('click', async () => {
 });
 $('#printBtn').addEventListener('click', () => window.print());
 
+const frDate = d => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
 async function loadStats() {
   const rid = R.id;
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const [cards, today, used] = await Promise.all([
-    sb.from('cards').select('id, first_name, code, phone, stamps, rewards, total_stamps', { count: 'exact' })
+    sb.from('cards').select('id, first_name, code, phone, stamps, rewards, total_stamps, created_at, last_stamp_at', { count: 'exact' })
       .eq('restaurant_id', rid).order('total_stamps', { ascending: false }).limit(1000),
     sb.from('events').select('id', { count: 'exact', head: true })
       .eq('restaurant_id', rid).eq('type', 'stamp').gte('created_at', start.toISOString()),
@@ -155,11 +159,32 @@ async function loadStats() {
   $('#cliCount').textContent = (cards.count == null ? list.length : cards.count) + ' au total';
   $('#clients').innerHTML = list.length ? list.map(c =>
     '<li><div class="av">' + esc(c.first_name[0].toUpperCase()) + '</div>' +
-    '<div class="grow"><div class="name">' + esc(c.first_name) + '</div><div class="small">' + esc(c.code) + ' · ' + esc(c.phone) + ' · ' + c.total_stamps + ' passages</div></div>' +
+    '<div class="grow"><div class="name">' + esc(c.first_name) + '</div><div class="small">' + esc(c.code) + ' · ' + esc(c.phone) + ' · ' + c.total_stamps + ' passages</div>' +
+    '<div class="small">Inscrit le ' + frDate(c.created_at) + (c.last_stamp_at ? ' · Dernier passage le ' + frDate(c.last_stamp_at) : ' · Aucun passage') + '</div></div>' +
     (c.rewards ? '<span class="pill gift">🎁 ' + c.rewards + '</span>' : '') +
-    '<span class="pill">' + c.stamps + '/' + R.goal + '</span></li>').join('')
+    '<span class="pill">' + c.stamps + '/' + R.goal + '</span>' +
+    '<button class="btn ghost sm" data-del="' + c.id + '" data-name="' + esc(c.first_name + ' (' + c.code + ')') + '" aria-label="Supprimer ' + esc(c.first_name) + '">Supprimer</button></li>').join('')
     : '<li class="small">Pas encore de client. Imprime l\'affiche et pose-la au comptoir.</li>';
 }
+
+// Suppression d'un client (avec confirmation)
+$('#clients').addEventListener('click', e => {
+  const b = e.target.closest('[data-del]'); if (!b) return;
+  $('#mBox').innerHTML = '<h3 style="margin-bottom:8px">Supprimer ce client ?</h3>' +
+    '<p class="small" style="margin-bottom:16px">' + esc(b.dataset.name) + ' : sa carte et tout son historique seront effacés définitivement.</p>' +
+    '<div class="row"><button class="btn ghost grow" id="mNo">Annuler</button><button class="btn accent grow" id="mYes">Supprimer</button></div>';
+  $('#modal').classList.add('on');
+  $('#mNo').addEventListener('click', () => $('#modal').classList.remove('on'));
+  $('#mYes').addEventListener('click', async () => {
+    $('#mYes').disabled = true;
+    const { data, error } = await sb.rpc('delete_card', { p_card_id: b.dataset.del });
+    $('#modal').classList.remove('on');
+    if (error || !data || data.error) return toast('Suppression impossible.');
+    toast('Client supprimé');
+    loadStats();
+  });
+});
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') $('#modal').classList.remove('on'); });
 </script>
 </body>
 </html>
