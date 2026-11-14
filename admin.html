@@ -34,12 +34,12 @@
       <div class="kpis" id="kpis" data-sec="main"></div>
 
       <div class="panel" data-sec="main">
-        <h3 style="margin-bottom:12px">Programme</h3>
-        <div class="field"><label for="setGoal">Tampons pour une récompense</label>
-          <select id="setGoal"><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select></div>
-        <div class="field"><label for="setReward">Récompense</label><input id="setReward" maxlength="60"></div>
-        <div class="field"><label>Couleur de la carte</label><div class="swatches" id="swatches"></div></div>
-        <button class="btn" id="saveBtn">Enregistrer</button>
+        <h3 style="margin-bottom:4px">Récompenses</h3>
+        <p class="small" style="margin-bottom:12px">1 passage = 1 point (plus avec les promos). Les clients cumulent sans limite et choisissent au comptoir : échanger ou continuer.</p>
+        <div id="rwList"></div>
+        <form id="rwAdd" style="margin-top:4px"><div class="grid2"><input class="inp" id="rwName" maxlength="60" placeholder="Récompense (ex. Dessert offert)" aria-label="Nom de la nouvelle récompense" required><input class="inp" id="rwCost" type="number" min="1" placeholder="Points" aria-label="Points nécessaires" required></div><button class="btn sm" type="submit" style="margin-top:8px">Ajouter la récompense</button></form>
+        <div class="field" style="margin-top:16px"><label>Couleur de la carte</label><div class="swatches" id="swatches"></div></div>
+        <button class="btn" id="saveBtn">Enregistrer la couleur</button>
       </div>
     </div>
 
@@ -114,21 +114,16 @@ function pick(id) {
   render();
   loadStats();
   loadPoints();
+  loadRewards();
 }
 
 function render() {
   setAccent(color);
   $('#rName').textContent = R.name;
-  $('#setGoal').value = String(R.goal);
-  if ($('#setGoal').value !== String(R.goal)) {       // valeur hors liste : on l'ajoute
-    $('#setGoal').insertAdjacentHTML('beforeend', '<option>' + R.goal + '</option>');
-    $('#setGoal').value = String(R.goal);
-  }
-  $('#setReward').value = R.reward;
   $('#swatches').innerHTML = COLORS.map(c => '<button type="button" class="sw ' + (c.toLowerCase() === color.toLowerCase() ? 'on' : '') + '" style="background:' + c + '" data-c="' + c + '" aria-label="Couleur ' + c + '"></button>').join('');
   const url = new URL('index.html?r=' + R.slug, location.href).href;
   $('#pName').textContent = R.name;
-  $('#pRule').textContent = R.goal + ' tampons = ' + R.reward.toLowerCase();
+  $('#pRule').textContent = 'Cumulez des points à chaque passage, échangez-les contre des cadeaux';
   $('#pUrl').textContent = url;
   drawQR($('#pQr'), url, 220);
 }
@@ -140,15 +135,13 @@ $('#swatches').addEventListener('click', e => {
 });
 
 $('#saveBtn').addEventListener('click', async () => {
-  const goal = parseInt($('#setGoal').value, 10), reward = $('#setReward').value.trim();
-  if (!reward) return toast('Indique la récompense.');
   const btn = $('#saveBtn'); btn.disabled = true;
-  const { data, error } = await sb.from('restaurants').update({ goal: goal, reward: reward, color: color }).eq('id', R.id).select();
+  const { data, error } = await sb.from('restaurants').update({ color: color }).eq('id', R.id).select();
   btn.disabled = false;
   if (error || !data || !data.length) return toast('Enregistrement impossible.');
   Object.assign(R, data[0]);
   render();
-  toast('Programme enregistré');
+  toast('Couleur enregistrée');
 });
 
 $('#copyBtn').addEventListener('click', async () => {
@@ -163,8 +156,8 @@ async function loadStats() {
   const rid = R.id;
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const [cards, today, used] = await Promise.all([
-    sb.from('cards').select('id, first_name, code, phone, stamps, rewards, total_stamps, created_at, last_stamp_at', { count: 'exact' })
-      .eq('restaurant_id', rid).order('total_stamps', { ascending: false }).limit(1000),
+    sb.from('cards').select('id, first_name, code, phone, points, total_stamps, created_at, last_stamp_at', { count: 'exact' })
+      .eq('restaurant_id', rid).order('points', { ascending: false }).limit(1000),
     sb.from('events').select('id', { count: 'exact', head: true })
       .eq('restaurant_id', rid).eq('type', 'stamp').gte('created_at', start.toISOString()),
     sb.from('events').select('id', { count: 'exact', head: true })
@@ -173,20 +166,19 @@ async function loadStats() {
   if (rid !== R.id) return;   // l'utilisateur a changé de restaurant entre-temps
   if (cards.error) return toast('Chargement des clients impossible.');
   const list = cards.data || [];
-  const pending = list.reduce((a, c) => a + c.rewards, 0);
+  const balance = list.reduce((a, c) => a + c.points, 0);
   $('#kpis').innerHTML = [
     [cards.count == null ? list.length : cards.count, 'Clients inscrits'],
-    [today.count || 0, "Tampons aujourd'hui"],
-    [pending, 'Récompenses à servir'],
-    [used.count || 0, 'Récompenses utilisées']
+    [today.count || 0, "Points distribués aujourd'hui"],
+    [balance, 'Points en cours chez les clients'],
+    [used.count || 0, 'Récompenses échangées']
   ].map(k => '<div class="kpi"><div class="n">' + k[0] + '</div><div class="t">' + k[1] + '</div></div>').join('');
   $('#cliCount').textContent = (cards.count == null ? list.length : cards.count) + ' au total';
   $('#clients').innerHTML = list.length ? list.map(c =>
     '<li><div class="av">' + esc(c.first_name[0].toUpperCase()) + '</div>' +
-    '<div class="grow"><div class="name">' + esc(c.first_name) + '</div><div class="small">' + esc(c.code) + ' · ' + esc(c.phone) + ' · ' + c.total_stamps + ' passages</div>' +
+    '<div class="grow"><div class="name">' + esc(c.first_name) + '</div><div class="small">' + esc(c.code) + ' · ' + esc(c.phone) + ' · ' + c.total_stamps + ' points gagnés au total</div>' +
     '<div class="small">Inscrit le ' + frDate(c.created_at) + (c.last_stamp_at ? ' · Dernier passage le ' + frDate(c.last_stamp_at) : ' · Aucun passage') + '</div></div>' +
-    (c.rewards ? '<span class="pill gift">🎁 ' + c.rewards + '</span>' : '') +
-    '<span class="pill">' + c.stamps + '/' + R.goal + '</span>' +
+    '<span class="pill">' + c.points + ' pts</span>' +
     '<button class="btn ghost sm" data-del="' + c.id + '" data-name="' + esc(c.first_name + ' (' + c.code + ')') + '" aria-label="Supprimer ' + esc(c.first_name) + '">Supprimer</button></li>').join('')
     : '<li class="small">Pas encore de client. Imprime l\'affiche et pose-la au comptoir.</li>';
 }
@@ -248,7 +240,7 @@ async function loadPoints() {
     '<span class="pill">' + (counts[p.id] || 0) + ' passages / 30 j</span></div>' +
     '<div style="margin-bottom:8px">' + ptStatus(p) + '</div>' +
     '<div class="field"><label for="pp' + i + '">Offre du moment (visible par le client)</label><input id="pp' + i + '" data-f="promo" value="' + esc(p.promo || '') + '" maxlength="80" placeholder="Ex. -10 % ce soir"></div>' +
-    '<div class="field"><label for="pm' + i + '">Tampons par passage</label><select id="pm' + i + '" data-f="mult">' +
+    '<div class="field"><label for="pm' + i + '">Points par passage</label><select id="pm' + i + '" data-f="mult">' +
       [1, 2, 3].map(m => '<option value="' + m + '"' + (p.multiplier === m ? ' selected' : '') + '>' + (m === 1 ? 'Normal (x1)' : m === 2 ? 'Doublés (x2)' : 'Triplés (x3)') + '</option>').join('') + '</select></div>' +
     '<div class="grid2"><div class="field"><label for="ps' + i + '">Du (facultatif)</label><input type="date" id="ps' + i + '" data-f="start" value="' + (p.promo_start || '') + '"></div>' +
     '<div class="field"><label for="pe' + i + '">Au (facultatif)</label><input type="date" id="pe' + i + '" data-f="end" value="' + (p.promo_end || '') + '"></div></div>' +
@@ -284,7 +276,7 @@ $('#ptList').addEventListener('click', e => {
   if (b.dataset.act === 'stop') return savePoint(card, true);
   const name = card.querySelector('[data-f="name"]').value;
   $('#mBox').innerHTML = '<h3 style="margin-bottom:8px">Supprimer ce point de vente ?</h3>' +
-    '<p class="small" style="margin-bottom:16px">' + esc(name) + ' disparaît de la liste. Les cartes et les tampons des clients sont conservés.</p>' +
+    '<p class="small" style="margin-bottom:16px">' + esc(name) + ' disparaît de la liste. Les cartes et les points des clients sont conservés.</p>' +
     '<div class="row"><button class="btn ghost grow" id="mNo">Annuler</button><button class="btn accent grow" id="mYes">Supprimer</button></div>';
   $('#modal').classList.add('on');
   $('#mNo').addEventListener('click', () => $('#modal').classList.remove('on'));
@@ -313,6 +305,64 @@ $('#ptStaff').addEventListener('change', async e => {
   const { data, error } = await sb.rpc('staff_set_point', { p_restaurant_id: R.id, p_user_id: s.dataset.uid, p_point_id: s.value || null });
   if (error || !data || data.error) { toast('Modification impossible.'); return loadPoints(); }
   toast('Compte rattaché');
+});
+
+// ---------- Catalogue de récompenses ----------
+let REWARDS = [];
+async function loadRewards() {
+  const rid = R.id;
+  const { data, error } = await sb.from('rewards_catalog').select('*').eq('restaurant_id', rid).order('cost');
+  if (rid !== R.id) return;
+  if (error) { $('#rwList').innerHTML = '<p class="small">Chargement impossible.</p>'; return; }
+  REWARDS = data || [];
+  $('#rwList').innerHTML = REWARDS.length ? REWARDS.map((w, i) =>
+    '<div class="ptcard" data-id="' + w.id + '">' +
+    '<div class="field"><label for="rn' + i + '">Récompense</label><input id="rn' + i + '" data-f="name" value="' + esc(w.name) + '" maxlength="60"></div>' +
+    '<div class="grid2"><div class="field"><label for="rc' + i + '">Points nécessaires</label><input id="rc' + i + '" data-f="cost" type="number" min="1" value="' + w.cost + '"></div>' +
+    '<div class="field"><label for="rs' + i + '">Places limitées (vide = illimité)</label><input id="rs' + i + '" data-f="stock" type="number" min="0" value="' + (w.stock === null ? '' : w.stock) + '"></div></div>' +
+    '<label class="small" style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" data-f="active"' + (w.active ? ' checked' : '') + '> Visible par les clients</label>' +
+    '<div class="row"><button class="btn sm grow" data-ract="save">Enregistrer</button><button class="btn ghost sm" data-ract="del">Supprimer</button></div></div>').join('')
+    : '<p class="small" style="margin-bottom:8px">Aucune récompense. Ajoutez-en une ci-dessous.</p>';
+}
+
+$('#rwList').addEventListener('click', async e => {
+  const b = e.target.closest('[data-ract]'); if (!b) return;
+  const card = b.closest('.ptcard');
+  const v = f => card.querySelector('[data-f="' + f + '"]');
+  if (b.dataset.ract === 'save') {
+    const stock = v('stock').value.trim();
+    const { data, error } = await sb.rpc('reward_save', {
+      p_restaurant_id: R.id, p_id: card.dataset.id, p_name: v('name').value,
+      p_cost: parseInt(v('cost').value, 10), p_stock: stock === '' ? null : parseInt(stock, 10), p_active: v('active').checked
+    });
+    if (error || !data || data.error) return toast('Vérifie le nom et le nombre de points.');
+    toast('Récompense enregistrée');
+    return loadRewards();
+  }
+  $('#mBox').innerHTML = '<h3 style="margin-bottom:8px">Supprimer cette récompense ?</h3>' +
+    '<p class="small" style="margin-bottom:16px">' + esc(v('name').value) + ' disparaît du catalogue. Les points des clients sont conservés.</p>' +
+    '<div class="row"><button class="btn ghost grow" id="mNo">Annuler</button><button class="btn accent grow" id="mYes">Supprimer</button></div>';
+  $('#modal').classList.add('on');
+  $('#mNo').addEventListener('click', () => $('#modal').classList.remove('on'));
+  $('#mYes').addEventListener('click', async () => {
+    $('#mYes').disabled = true;
+    const { data, error } = await sb.rpc('reward_delete', { p_id: card.dataset.id });
+    $('#modal').classList.remove('on');
+    if (error || !data || data.error) return toast('Suppression impossible.');
+    toast('Récompense supprimée');
+    loadRewards();
+  });
+});
+
+$('#rwAdd').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('#rwName').value.trim(), cost = parseInt($('#rwCost').value, 10);
+  if (!name || !(cost > 0)) return;
+  const { data, error } = await sb.rpc('reward_save', { p_restaurant_id: R.id, p_id: null, p_name: name, p_cost: cost, p_stock: null, p_active: true });
+  if (error || !data || data.error) return toast('Ajout impossible.');
+  $('#rwName').value = ''; $('#rwCost').value = '';
+  toast(name + ' ajouté au catalogue');
+  loadRewards();
 });
 </script>
 </body>
