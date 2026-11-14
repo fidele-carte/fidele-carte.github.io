@@ -17,6 +17,7 @@
 
   <main id="app" class="hide">
     <h1 style="margin-bottom:14px">Scanner une carte</h1>
+    <div id="ptBanner"></div>
     <div class="scanner">
       <video id="video" playsinline muted></video>
       <div class="frame"><i></i><i></i><i></i><i></i></div>
@@ -58,7 +59,23 @@ const video = $('#video'), canvas = $('#canvas'), ctx = canvas.getContext('2d', 
 requireStaff($('#login'), () => {
   $('#app').classList.remove('hide');
   $('#topActions').classList.remove('hide');
+  loadMyPoint();
 });
+
+// Point de vente de ce compte et sa promo du moment
+async function loadMyPoint() {
+  const { data: s } = await sb.auth.getSession();
+  if (!s.session) return;
+  const { data } = await sb.from('staff').select('point_id, points(name, promo, multiplier, promo_start, promo_end)').eq('user_id', s.session.user.id);
+  const row = (data || []).find(x => x.points);
+  if (!row) return;
+  const p = row.points, t = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
+  const active = ((p.promo && p.promo.trim()) || p.multiplier > 1) && (!p.promo_start || p.promo_start <= t) && (!p.promo_end || p.promo_end >= t);
+  const promo = active ? [p.multiplier > 1 ? 'Tampons x' + p.multiplier : '', p.promo || ''].filter(Boolean).join(' · ') : '';
+  $('#ptBanner').innerHTML = '<div class="panel" style="padding:12px 16px;margin-bottom:14px">' +
+    '<div class="small">Point de vente</div><div class="name">' + esc(p.name) + '</div>' +
+    (promo ? '<div style="margin-top:6px"><span class="pill gift">Promo : ' + esc(promo) + '</span></div>' : '') + '</div>';
+}
 $('#logoutBtn').addEventListener('click', logout);
 
 // ---------- Caméra ----------
@@ -105,7 +122,9 @@ async function stamp(scan) {
   cur = data;
   walletCall('sync', data.card.token).catch(() => {});   // met à jour la carte Google Wallet
   if (navigator.vibrate) navigator.vibrate(80);
-  showCard('ok', data.won ? '🎁 Carte complétée : ' + data.reward : '✓ +1 tampon');
+  const added = data.added || 1;
+  const plus = '+' + added + ' tampon' + (added > 1 ? 's' : '') + (data.promo ? ' · ' + data.promo : '');
+  showCard('ok', data.won ? '🎁 Carte complétée : ' + data.reward + ' (' + plus + ')' : '✓ ' + plus);
 }
 
 async function redeem() {
