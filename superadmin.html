@@ -262,7 +262,7 @@ $('#fUser').addEventListener('submit', async e => {
   $('#uDone').classList.remove('hide');
   const text = 'Fidèle — ' + resto.name + '\nAdresse : ' + SITE + page + '\nEmail : ' + email + (c.exists ? '' : '\nMot de passe : ' + password);
   $('#uCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(text); toast('Infos copiées'); } catch (_) { toast('Copie impossible'); } });
-  $('#fUser').reset(); $('#uPass').value = genPass(); $('#uResto').value = rid;
+  $('#fUser').reset(); $('#uPass').value = genPass(); $('#uResto').value = rid; $('#uRole').value = role;
   load();
 });
 
