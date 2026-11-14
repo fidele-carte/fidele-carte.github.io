@@ -6,6 +6,14 @@
 <title>Gérant · Fidèle</title>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<style>
+.tabs2{display:flex;gap:6px;margin-bottom:14px}
+.tabs2 button{flex:1;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-weight:600;font-size:14px}
+.tabs2 button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ptcard{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
+.ptcard .field{margin-bottom:10px}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -22,9 +30,10 @@
         <h1 id="rName" style="margin:0"></h1>
         <select class="inp hide" id="rSel" style="width:auto;padding:8px 12px" aria-label="Restaurant"></select>
       </div>
-      <div class="kpis" id="kpis"></div>
+      <div class="tabs2" id="tabs"><button class="on" data-tab="main">Tableau de bord</button><button data-tab="points">Points de vente</button></div>
+      <div class="kpis" id="kpis" data-sec="main"></div>
 
-      <div class="panel">
+      <div class="panel" data-sec="main">
         <h3 style="margin-bottom:12px">Programme</h3>
         <div class="field"><label for="setGoal">Tampons pour une récompense</label>
           <select id="setGoal"><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select></div>
@@ -34,7 +43,7 @@
       </div>
     </div>
 
-    <div class="panel poster" id="poster">
+    <div class="panel poster" id="poster" data-sec="main">
       <h2 id="pName" style="font-size:22px"></h2>
       <p class="small">Scannez pour créer votre carte de fidélité</p>
       <div class="qr" id="pQr"></div>
@@ -45,10 +54,24 @@
       </div>
     </div>
 
-    <div class="panel noprint">
+    <div class="panel noprint" data-sec="main">
       <div class="row sp" style="margin-bottom:6px"><h3>Clients</h3><span class="small" id="cliCount"></span></div>
       <ul class="list" id="clients"></ul>
     </div>
+
+    <section class="noprint hide" data-sec="points">
+      <div class="panel">
+        <h3 style="margin-bottom:4px">Points de vente</h3>
+        <p class="small" style="margin-bottom:12px">Une seule carte pour vos clients, valable partout. Chaque point de vente peut avoir son offre du moment.</p>
+        <div id="ptList"><p class="small">Chargement…</p></div>
+        <form id="ptAdd" class="row" style="margin-top:4px"><input class="inp" id="ptName" maxlength="40" placeholder="Nouveau point de vente (ex. Camion)" aria-label="Nom du nouveau point de vente" style="flex:1" required><button class="btn sm" type="submit">Ajouter</button></form>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:4px">Comptes de l'équipe</h3>
+        <p class="small" style="margin-bottom:8px">Rattachez chaque téléphone ou tablette de scan à son point de vente : la promo de ce point s'appliquera à ses scans.</p>
+        <ul class="list" id="ptStaff"></ul>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -90,6 +113,7 @@ function pick(id) {
   color = R.color;
   render();
   loadStats();
+  loadPoints();
 }
 
 function render() {
@@ -185,6 +209,111 @@ $('#clients').addEventListener('click', e => {
   });
 });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') $('#modal').classList.remove('on'); });
+
+// ---------- Onglets ----------
+$('#tabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-tab]'); if (!b) return;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('[data-sec]').forEach(el => el.classList.toggle('hide', el.dataset.sec !== b.dataset.tab));
+});
+
+// ---------- Points de vente ----------
+let POINTS = [];
+const todayParis = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
+function ptStatus(p) {
+  const has = (p.promo && p.promo.trim()) || p.multiplier > 1;
+  if (!has) return '';
+  const t = todayParis();
+  if (p.promo_start && p.promo_start > t) return '<span class="pill">Programmée</span>';
+  if (p.promo_end && p.promo_end < t) return '<span class="pill">Terminée</span>';
+  return '<span class="pill gift">Promo en cours</span>';
+}
+
+async function loadPoints() {
+  const rid = R.id;
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const [pts, staff, ev] = await Promise.all([
+    sb.from('points').select('*').eq('restaurant_id', rid).order('created_at'),
+    sb.rpc('manager_staff', { p_restaurant_id: rid }),
+    sb.from('events').select('point_id').eq('restaurant_id', rid).eq('type', 'stamp').gte('created_at', since).limit(10000)
+  ]);
+  if (rid !== R.id) return;
+  if (pts.error) { $('#ptList').innerHTML = '<p class="small">Chargement impossible.</p>'; return; }
+  POINTS = pts.data || [];
+  const counts = {};
+  (ev.data || []).forEach(e => { const k = e.point_id || 'none'; counts[k] = (counts[k] || 0) + 1; });
+  $('#ptList').innerHTML = POINTS.length ? POINTS.map((p, i) =>
+    '<div class="ptcard" data-id="' + p.id + '">' +
+    '<div class="row sp" style="margin-bottom:10px"><input class="inp" data-f="name" value="' + esc(p.name) + '" maxlength="40" aria-label="Nom du point de vente" style="flex:1;font-weight:600">' +
+    '<span class="pill">' + (counts[p.id] || 0) + ' passages / 30 j</span></div>' +
+    '<div style="margin-bottom:8px">' + ptStatus(p) + '</div>' +
+    '<div class="field"><label for="pp' + i + '">Offre du moment (visible par le client)</label><input id="pp' + i + '" data-f="promo" value="' + esc(p.promo || '') + '" maxlength="80" placeholder="Ex. -10 % ce soir"></div>' +
+    '<div class="field"><label for="pm' + i + '">Tampons par passage</label><select id="pm' + i + '" data-f="mult">' +
+      [1, 2, 3].map(m => '<option value="' + m + '"' + (p.multiplier === m ? ' selected' : '') + '>' + (m === 1 ? 'Normal (x1)' : m === 2 ? 'Doublés (x2)' : 'Triplés (x3)') + '</option>').join('') + '</select></div>' +
+    '<div class="grid2"><div class="field"><label for="ps' + i + '">Du (facultatif)</label><input type="date" id="ps' + i + '" data-f="start" value="' + (p.promo_start || '') + '"></div>' +
+    '<div class="field"><label for="pe' + i + '">Au (facultatif)</label><input type="date" id="pe' + i + '" data-f="end" value="' + (p.promo_end || '') + '"></div></div>' +
+    '<div class="row"><button class="btn sm grow" data-act="save">Enregistrer</button><button class="btn ghost sm" data-act="stop">Arrêter la promo</button><button class="btn ghost sm" data-act="del">Supprimer</button></div>' +
+    '</div>').join('') + (counts.none ? '<p class="small" style="margin-bottom:8px">' + counts.none + ' passages / 30 j scannés par un compte sans point de vente.</p>' : '')
+    : '<p class="small" style="margin-bottom:8px">Aucun point de vente. Ajoutez-en un ci-dessous (ex. Vélodrome, Camion).</p>';
+  const list = staff.data || [];
+  $('#ptStaff').innerHTML = list.length ? list.map(s =>
+    '<li><div class="grow"><div class="name" style="font-size:14px">' + esc(s.email) + '</div><div class="small">' + (s.role === 'gerant' ? 'Gérant' : 'Serveur') + '</div></div>' +
+    '<select class="inp" data-uid="' + s.user_id + '" aria-label="Point de vente de ' + esc(s.email) + '" style="width:auto;padding:8px 10px"><option value="">Aucun point</option>' +
+    POINTS.map(p => '<option value="' + p.id + '"' + (s.point_id === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></li>').join('')
+    : '<li class="small">Aucun compte.</li>';
+}
+
+async function savePoint(card, clear) {
+  const v = f => card.querySelector('[data-f="' + f + '"]').value;
+  const name = v('name').trim();
+  if (!name) return toast('Indique le nom du point de vente.');
+  const { data, error } = await sb.rpc('point_save', {
+    p_restaurant_id: R.id, p_id: card.dataset.id, p_name: name,
+    p_promo: clear ? '' : v('promo'), p_multiplier: clear ? 1 : parseInt(v('mult'), 10),
+    p_start: clear ? null : (v('start') || null), p_end: clear ? null : (v('end') || null)
+  });
+  if (error || !data || data.error) return toast(data && data.error === 'dates_invalides' ? 'La date de fin est avant la date de début.' : 'Enregistrement impossible.');
+  toast(clear ? 'Promo arrêtée' : 'Point de vente enregistré');
+  loadPoints();
+}
+
+$('#ptList').addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const card = b.closest('.ptcard');
+  if (b.dataset.act === 'save') return savePoint(card, false);
+  if (b.dataset.act === 'stop') return savePoint(card, true);
+  const name = card.querySelector('[data-f="name"]').value;
+  $('#mBox').innerHTML = '<h3 style="margin-bottom:8px">Supprimer ce point de vente ?</h3>' +
+    '<p class="small" style="margin-bottom:16px">' + esc(name) + ' disparaît de la liste. Les cartes et les tampons des clients sont conservés.</p>' +
+    '<div class="row"><button class="btn ghost grow" id="mNo">Annuler</button><button class="btn accent grow" id="mYes">Supprimer</button></div>';
+  $('#modal').classList.add('on');
+  $('#mNo').addEventListener('click', () => $('#modal').classList.remove('on'));
+  $('#mYes').addEventListener('click', async () => {
+    $('#mYes').disabled = true;
+    const { data, error } = await sb.rpc('point_delete', { p_id: card.dataset.id });
+    $('#modal').classList.remove('on');
+    if (error || !data || data.error) return toast('Suppression impossible.');
+    toast('Point de vente supprimé');
+    loadPoints();
+  });
+});
+
+$('#ptAdd').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('#ptName').value.trim(); if (!name) return;
+  const { data, error } = await sb.rpc('point_save', { p_restaurant_id: R.id, p_id: null, p_name: name, p_promo: '', p_multiplier: 1, p_start: null, p_end: null });
+  if (error || !data || data.error) return toast('Ajout impossible.');
+  $('#ptName').value = '';
+  toast(name + ' ajouté');
+  loadPoints();
+});
+
+$('#ptStaff').addEventListener('change', async e => {
+  const s = e.target.closest('[data-uid]'); if (!s) return;
+  const { data, error } = await sb.rpc('staff_set_point', { p_restaurant_id: R.id, p_user_id: s.dataset.uid, p_point_id: s.value || null });
+  if (error || !data || data.error) { toast('Modification impossible.'); return loadPoints(); }
+  toast('Compte rattaché');
+});
 </script>
 </body>
 </html>
