@@ -157,7 +157,7 @@ async function loadStats() {
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const [cards, today, used] = await Promise.all([
     sb.from('cards').select('id, first_name, code, phone, points, total_stamps, created_at, last_stamp_at', { count: 'exact' })
-      .eq('restaurant_id', rid).order('points', { ascending: false }).limit(1000),
+      .eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(1000),
     sb.from('events').select('id', { count: 'exact', head: true })
       .eq('restaurant_id', rid).eq('type', 'stamp').gte('created_at', start.toISOString()),
     sb.from('events').select('id', { count: 'exact', head: true })
