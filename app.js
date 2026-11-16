@@ -45,11 +45,23 @@ const errText = code => ERRORS[code] || 'Erreur : ' + code;
 const ICON_STAR = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7L12 17.3 5.7 21.2l1.7-7L2 9.5l7.1-.6z"/></svg>';
 const ICON_GIFT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8c-2-4-6-4-6-1.5S10 8 12 8zm0 0c2-4 6-4 6-1.5S14 8 12 8z"/></svg>';
 
-// Carte façon Wallet. card = {first_name, code, points, resto:{name, color}, catalog:[{name, cost, stock}]}
+// Restaurants avec un visuel à eux (images dans le dossier img/ du site)
+const BRANDS = { 'casa-di-meco': 1 };
+function brandImg(slug, kind) { return 'img/' + slug + '-' + kind + '.jpg'; }
+
+// Carte façon Wallet. card = {first_name, code, points, resto:{name, slug, color}, catalog:[{name, cost, stock}]}
 function cardHTML(card) {
   const r = card.resto, cat = card.catalog || [];
   const next = cat.find(w => w.cost > card.points && w.stock !== 0);
   const pct = next ? Math.min(100, card.points / next.cost * 100) : 100;
+  const bar = next ? '<div style="height:8px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden;margin:10px 0 6px"><b style="display:block;height:100%;width:' + pct + '%;background:#fff;border-radius:99px"></b></div>' +
+      '<div style="font-size:13px;margin-bottom:16px">Encore ' + (next.cost - card.points) + ' pts pour : ' + esc(next.name) + '</div>' : '<div style="height:16px"></div>';
+  if (BRANDS[r.slug]) return '<div class="wallet" style="padding:0;overflow:hidden;background:' + esc(r.color) + '">' +
+    '<img src="' + brandImg(r.slug, 'wide') + '" alt="" style="display:block;width:100%;height:110px;object-fit:cover">' +
+    '<div style="padding:18px 20px 20px"><img src="' + brandImg(r.slug, 'hero') + '" alt="' + esc(r.name) + '" style="display:block;height:74px;margin:0 auto 4px">' +
+    '<div class="row sp" style="align-items:flex-end;margin-top:8px"><div><div class="lbl">Mes points</div><div style="font-family:Fraunces,Georgia,serif;font-size:52px;font-weight:600;line-height:1.05">' + card.points + '</div></div>' +
+    '<div style="text-align:right"><div class="lbl">Membre</div><div class="val">' + esc(card.first_name) + '</div></div></div>' +
+    bar + '<div class="qrbox"><div id="qr"></div><div class="code">' + esc(card.code) + '</div></div></div></div>';
   return '<div class="wallet">' +
     '<div class="row sp" style="align-items:flex-start"><div class="logo">' + esc(r.name) + '</div>' +
     '<div style="text-align:right"><div class="lbl">Membre</div><div class="val">' + esc(card.first_name) + '</div></div></div>' +
